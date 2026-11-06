@@ -25,6 +25,7 @@
     fig.className = "celular-bloco";
     fig.style.setProperty("--capa", p.capinha || "#1C3753");
     fig.innerHTML =
+      '<div class="giro" tabindex="0" role="group" aria-label="Celular com o app ' + esc(p.nome) + '. Arraste pela borda ou use as setas para girar e ver a capinha.">' +
       '<div class="celular" id="celular-' + i + '">' +
         '<div class="face frente">' +
           '<span class="botao b-acao"></span><span class="botao b-vol1"></span><span class="botao b-vol2"></span><span class="botao b-power"></span>' +
@@ -41,12 +42,12 @@
           '<span class="verso-dp" aria-hidden="true">DP</span>' +
         '</div>' +
       '</div>' +
+      '</div>' +
       '<span class="sombra" aria-hidden="true"></span>' +
       '<figcaption>' +
         '<span class="cap-num">' + num(i) + '</span>' +
         '<span class="cap-txt"><strong>' + esc(p.nome) + '</strong><span>' + esc(p.segmento) + '</span></span>' +
         '<span class="cap-acoes">' +
-          '<button type="button" class="btn-sec" data-virar="' + i + '" aria-pressed="false">Ver a capinha</button>' +
           '<a class="btn-sec" href="' + esc(p.app) + '" target="_blank" rel="noopener">Tela cheia <span aria-hidden="true">↗</span></a>' +
         '</span>' +
       '</figcaption>';
@@ -71,31 +72,72 @@
     window.addEventListener("resize", tudo); tudo();
   }
 
-  /* virar o celular para mostrar a capinha */
+  /* girar o celular com o dedo ou o mouse, arrastando pela borda */
   var reduz = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  document.addEventListener("click", function (ev) {
-    var b = ev.target.closest("[data-virar]");
-    if (!b) return;
-    var cel = document.getElementById("celular-" + b.getAttribute("data-virar"));
-    if (cel.classList.contains("girando")) return;
+  document.querySelectorAll(".giro").forEach(function (zona) {
+    var cel = zona.querySelector(".celular");
     var frente = cel.querySelector(".frente"), verso = cel.querySelector(".verso");
-    var paraVerso = !cel.classList.contains("mostra-verso");
-    function trocar() {
-      cel.classList.toggle("mostra-verso", paraVerso);
-      frente.setAttribute("aria-hidden", paraVerso ? "true" : "false");
-      verso.setAttribute("aria-hidden", paraVerso ? "false" : "true");
-      b.textContent = paraVerso ? "Ver a tela" : "Ver a capinha";
-      b.setAttribute("aria-pressed", paraVerso ? "true" : "false");
+    var ang = 0, ini = 0, x0 = 0, y0 = 0, arrastando = false, decidido = false, anim = null;
+    var hist = [];
+
+    function desenhar() {
+      var n = ((ang % 360) + 360) % 360;
+      var costas = n > 90 && n < 270;
+      var vis = costas ? n - 180 : (n >= 270 ? n - 360 : n);
+      cel.style.transform = "perspective(1600px) rotateY(" + vis.toFixed(2) + "deg)";
+      if (cel.classList.contains("mostra-verso") !== costas) {
+        cel.classList.toggle("mostra-verso", costas);
+        frente.setAttribute("aria-hidden", costas ? "true" : "false");
+        verso.setAttribute("aria-hidden", costas ? "false" : "true");
+      }
     }
-    if (reduz) { trocar(); return; }
-    cel.classList.add("girando", "saindo");
-    setTimeout(function () {
-      trocar();
-      cel.classList.remove("saindo"); cel.classList.add("entrando");
-      void cel.offsetWidth;
-      cel.classList.remove("entrando");
-      setTimeout(function () { cel.classList.remove("girando"); }, 320);
-    }, 300);
+    function animarPara(alvo) {
+      cancelAnimationFrame(anim);
+      if (reduz) { ang = alvo; desenhar(); return; }
+      var de = ang, t0 = performance.now(), dur = 520;
+      (function passo(t) {
+        var k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+        ang = de + (alvo - de) * e; desenhar();
+        if (k < 1) anim = requestAnimationFrame(passo);
+      })(t0);
+    }
+    zona.addEventListener("pointerdown", function (ev) {
+      if (ev.button !== 0) return;
+      cancelAnimationFrame(anim);
+      arrastando = true; decidido = false;
+      x0 = ev.clientX; y0 = ev.clientY; ini = ang; hist = [[performance.now(), ang]];
+    });
+    zona.addEventListener("pointermove", function (ev) {
+      if (!arrastando) return;
+      var dx = ev.clientX - x0, dy = ev.clientY - y0;
+      if (!decidido) {
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+        if (Math.abs(dy) > Math.abs(dx)) { arrastando = false; return; }   // rolagem da página
+        decidido = true; zona.classList.add("arrastando");
+        try { zona.setPointerCapture(ev.pointerId); } catch (e) {}
+      }
+      ang = ini + dx * 180 / (zona.clientWidth * 0.85);
+      hist.push([performance.now(), ang]); if (hist.length > 6) hist.shift();
+      desenhar();
+    });
+    function soltar() {
+      if (!arrastando) return;
+      arrastando = false; zona.classList.remove("arrastando");
+      if (!decidido) return;
+      var a = hist[0], b = hist[hist.length - 1];
+      var vel = b[0] > a[0] ? (b[1] - a[1]) / (b[0] - a[0]) : 0;       // graus por ms
+      animarPara(Math.round((ang + vel * 180) / 180) * 180);
+    }
+    zona.addEventListener("pointerup", soltar);
+    zona.addEventListener("pointercancel", soltar);
+    zona.addEventListener("keydown", function (ev) {
+      var alvo = Math.round(ang / 180) * 180;
+      if (ev.key === "ArrowRight") alvo += 180;
+      else if (ev.key === "ArrowLeft") alvo -= 180;
+      else return;
+      ev.preventDefault(); animarPara(alvo);
+    });
+    desenhar();
   });
 
   /* ---------- detalhes ---------- */
